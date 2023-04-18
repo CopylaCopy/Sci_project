@@ -1,0 +1,33 @@
+;
+;	File 'pep.top' was generated
+;	By user: onbekend (0)
+;	On host: onbekend
+;	At date: Wed Mar 18 18:02:44 2015
+;
+;	This is a standalone topology file
+;
+;	It was generated using program:
+;	pdb2gmx - VERSION 4.5.2
+;
+;	Command line was:
+;	pdb2gmx -f exp.pdb -o pep.gro -p pep.top 
+;
+;	Force field was read from the standard Gromacs share directory.
+;
+
+; Include forcefield parameters
+#include "amber99sb-ildn.ff/forcefield.itp"
+#include "./pep.itp"
+#include "amber99sb-ildn.ff/tip3p.itp"
+#include "amber99sb-ildn.ff/ions.itp"
+
+[ system ]
+; Name
+Protein 2LZM
+
+[ molecules ]
+; Compound        #mols
+Protein_chain_A             1
+;SOL         10327
+;NA               21
+;CL               29

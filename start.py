@@ -4,172 +4,229 @@ import pandas as pd
 import os
 import subprocess
 import shutil
+from Bio.Data.IUPACData import protein_letters_1to3 as acids
+import argparse
+import logging
+import sys
 
 
+def my_custom_logger(logger_name, level=logging.DEBUG):
+    """
+    Method to return a custom logger with the given name and level
+    """
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(level)
+    format_string = (
+        "%(asctime)s — %(levelname)s: %(lineno)d — %(message)s"
+    )
+    log_format = logging.Formatter(format_string)
+    # Creating and adding the console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(log_format)
+    logger.addHandler(console_handler)
+    # Creating and adding the file handler
+    file_handler = logging.FileHandler(logger_name, mode='w')
+    file_handler.setFormatter(log_format)
+    logger.addHandler(file_handler)
+    return logger
 
-
-#PP: it is better to use pdbtools for cleaning the file. Particularly, there are a lot of pitfalls regarding the residue numbering.
-def clean_pdb(file_name):
-    new_file = []
-    counter_new = 0
-    counter_new_res = 0
-    res_counter = 0
-    mark = True
-    with open(file_name+'.pdb') as a:
+def clean_pdb(cur_dir, file_name):
+    # cleans water molecules and leaves only one chain (in case of a number subunits in file )
+    with open(os.path.join(cur_dir, f'{file_name}.pdb')) as a:
         for line in a:
-            if line.startswith('ATOM') and mark:
-                new_res = line[17:20]
-                counter_atom = int(line[6:11].lstrip())
-                counter_res = int(line[23:26].lstrip())
-                if counter_res !=res_counter:
-                    counter_new_res +=1
-                    temp = '    '+ str(counter_new_res)
-                    temp = temp[-5:]
-                counter_new+=1
-                temp_atom = '    '+str(counter_new)
-                temp_atom = temp_atom[-5:]
+            if line.startswith('DBREF'):
+                chain = line.split()[2]
+                break
+    args = subprocess.Popen(['pdb_selchain', f'-{chain}', f'{file_name}.pdb'], stdout=subprocess.PIPE)
+    args_ = subprocess.Popen(['pdb_delhetatm'], stdin=args.stdout, stdout = subprocess.PIPE)
+    args__ = subprocess.Popen(['pdb_tidy'], stdin=args_.stdout, stdout=open(f'{file_name}_clean.pdb', 'w'))
+    args__.communicate()
+    args = subprocess.Popen(['pdb_wc', f'{file_name}_clean.pdb'], stdout=subprocess.PIPE)
+    args_ = subprocess.Popen(['grep', 'chain'], stdin=args.stdout, stdout = subprocess.PIPE)
+    out, _ = args_.communicate()
+    return int(out.decode().split('\t')[1]) ==1
 
-                if res_counter<= counter_res:
-                    res_counter = counter_res
-                    new_line = line[:6]+temp_atom+line[11:22]+temp+line[26:]
-                    new_file.append(line)
-                    #break
+def check_mutagenesis(pos, pdb_path, res):
+    args = subprocess.Popen(['pdb_selres', f'-{pos}', f'{pdb_path}'], stdout=subprocess.PIPE)
+    args_ = subprocess.Popen(['grep', 'ATOM'], stdin=args.stdout, stdout=subprocess.PIPE)
+    args__ = subprocess.Popen(['tail', '-1'], stdout=subprocess.PIPE, stdin=args_.stdout)
+    out, _ = args__.communicate()
+    return res == out.split()[3]
+
+
+def main():
+    parser = argparse.ArgumentParser(description="run")
+    parser.add_argument("--dataset", type=str, default="dataset_prot.csv", help="dataset")
+    parser.add_argument("--delim", type=str, default=";", help="delimiter of each line in the dataset file")
+    parser.add_argument("--rosetta_path", type=str, default='/home/ekaterina_andreichuk/Downloads/rosetta_src_2021.16.61629_bundle/main/source/bin/rosetta_scripts.default.linuxgccrelease', help="path to rosetta")
+    parser.add_argument("--gmx_path", type=str, default='/usr/local/bin/gmx', help="path to gmx")
+    #add force reload from some step for particular pdb_id
+    # parser.add_argument("--lambda_u", type=float, default=0.1, help="regularization parameter lambda_u of the CF model")
+    # parser.add_argument("--lambda_v", type=float, default=0.1, help="regularization parameter lambda_v of the CF model")
+    # parser.add_argument("--als_iter", type=int, default=15, help="# of iterations for ALS training")
+    # parser.add_argument("--debug_iter", type=int, default=20, help="# of iterations in the debugging stage")
+    # parser.add_argument("--debug_lr", type=float, default=0.05, help="learning rate in the debugging stage")
+    # parser.add_argument("--retrain", type=str, default="full", help="the retraining mode in the debugging stage: full/inc")
+    # parser.add_argument("--process", type=int, default=4, help="# of processes in the debugging stage")
+    # parser.add_argument("--mode", type=str, default="debug", help="debug/test")
+    # parser.add_argument("--implicit", action='store_true', help="use implicit ALS")
+    # parser.add_argument("--alpha", type=int, default=1, help="confidence scaling for implicit feedback dataset")
+    # parser.add_argument("--als_threads", type=int, default=6, help="num threads during implicit ALS fit")
+
+    args_p = parser.parse_args()
+
+    cur_dir = os.getcwd()
+    df = pd.read_csv(args_p.dataset, delimiter =args_p.delim)
+    without_structure = []
+    skipped = []
+    logger_all = my_custom_logger(os.path.join(cur_dir, 'logger.log'))
+    for _, row in df.iterrows():
+        pdb_id = row.pdb_id
+        position = row.position
+        wild_type = row.wild_type
+        mutation = row.mutation 
+        if os.path.isdir(os.path.join(cur_dir, pdb_id)) and pdb_id not in without_structure:
+            #PP: check that each 'if' has 'else'
+            #PP: avoid jumping over directories. You can make path variable using os.path.join(workdir, pdb_id)
+            if not os.path.isfile(os.path.join(cur_dir, pdb_id, f'{pdb_id}_clean.pdb')):   
+                if not clean_pdb(cur_dir, pdb_id):
+                    without_structure.append(pdb_id)
+                    logger_all.info(f'Error during cleaning pdb file for {pdb_id}. Continuing to the next structure.')
                 else:
-                    mark = False
-            elif not line.startswith('ATOM') and not line.startswith('HETATM'):
-                new_file.append(line)
+                    logger_all.info(f'Cleaned {pdb_id}.pdb')
 
-
-    with open(f'{file_name}_clean.pdb', 'w') as f:
-        for i in new_file:
-            f.write(i)
-
-
-#PP: you can use bulit-in dictionaries for amino acids, e.g. in biopython
-acids = {'A':'ALA', 'R':'ARG', 'D': 'ASP', 'N':'ASN', 'C':'CYS', 
-           'E':'GLU', 'Q':'GLN', 'G':'GLY', 'H':'HIS', 'I': 'ILE',
-            'L': 'LEU', 'K':'LYS', 'M':'MET', 'F':'PHE',
-           'P': 'PRO', 'S':'SER', 'T':'THR', 'W':'TRP', 'Y': 'TYR',
-           'V':'VAL'}
-
-#PP: think in advance of usage on other devices, e.g. all the pathes should be either input parameters or relative ones
-gmx = '/usr/local/bin/gmx'
-rosetta = '/home/ekaterina_andreichuk/Downloads/rosetta_src_2021.16.61629_bundle/main/source/bin/rosetta_scripts.default.linuxgccrelease'
-
-df = pd.read_csv('dataset_prot.csv', delimiter = ';')
-for row in df.iterrows():
-    pdb_id = row[1].pdb_id
-    position = row[1].position
-    wild_type = row[1].wild_type
-    mutation = row[1].mutation
-    if os.path.isdir(pdb_id):
-    #PP: check that each 'if' has 'else'
-
-        os.chdir(pdb_id)
-        #PP: avoid jumping over directories. You can make path variable using os.path.join(workdir, pdb_id)
-
-        print(os.getcwd())
-        clean_pdb(pdb_id)
-        dir_name = wild_type+str(position)+mutation
-        if not os.path.isdir(dir_name):
-            os.mkdir(dir_name)
-        os.chdir(dir_name)
-        try:
-            print(dir_name)
-            if not os.path.isfile(f'{dir_name}.pdb'):
-                cur_dir = os.getcwd()
-                #create mutate.xml
-                shutil.copyfile(os.path.abspath('../../mutate.xml'), cur_dir+'/mutate.xml')
-                template_string = f'''<MutateResidue name="one_point_mutation" target="{str(position)}A" new_res="{acids[mutation]}" preserve_atom_coords="false"
-                mutate_self="false" update_polymer_bond_dependent="false"/>
-                '''
-                temp_string = '<Add mover="one_point_mutation"/>'
-                new_text = []
-                with open('mutate.xml') as f:
-                    for line in f:
-                        if '/MOVERS' in line:
-                            new_text.append(template_string)
-                        elif '</PROTOCOLS>' in line:
-                            new_text.append(temp_string)
-                        new_text.append(line)
-                with open('mutate.xml', 'w') as f:
-                    for i in new_text:
-                        f.write(i)
-                args = [rosetta, '-s', f'../{pdb_id}_clean.pdb', '-parser:protocol', 'mutate.xml'] 
-                subprocess.call(args)
-                args = ['mv', f'{pdb_id}_clean_0001.pdb', f'{dir_name}.pdb']
-                subprocess.call(args)
-    #               if True: #add check
-    #                   print('mutagenesis sucessfull')
-
-            if not os.path.isfile('emp.gro'):
+            dir_name = wild_type+str(position)+mutation
+            mut_dir = os.path.join(cur_dir, pdb_id, dir_name)
+            if not os.path.isdir(os.path.join(cur_dir, pdb_id, dir_name)):        
+                os.mkdir(mut_dir) 
+            if os.path.isfile(os.path.join(mut_dir, 'md.gro')):
+                skipped.append(' '.join([pdb_id, dir_name]))
+                continue
+            logger = my_custom_logger(os.path.join(mut_dir, 'logger.log'))          
+            logger.info(os.path.join(pdb_id, dir_name))
+            # if not os.path.isfile(os.path.join(mut_dir, f'{dir_name}.pdb')):
+            #     #create mutate.xml
+            #     template_string = f'''<MutateResidue name="one_point_mutation" target="{str(position)}A" new_res="{acids[mutation].upper()}" preserve_atom_coords="false"
+            #     mutate_self="false" update_polymer_bond_dependent="false"/>'''
+            #     temp_string = '<Add mover="one_point_mutation"/>'
+            #     new_text = []
+            #     with open(os.path.join(cur_dir, 'mutate.xml'), 'r') as f:
+            #         for line in f:
+            #             if '/MOVERS' in line:
+            #                 new_text.append(template_string)
+            #             elif '</PROTOCOLS>' in line:
+            #                 new_text.append(temp_string)
+            #             new_text.append(line)
+            #     with open(os.path.join(mut_dir, 'mutate.xml'), 'w') as f:
+            #         for i in new_text:
+            #             f.write(i)
+            #     args = [args_p.rosetta_path, '-s', os.path.join(cur_dir, pdb_id, f'{pdb_id}_clean.pdb'), '-parser:protocol', 
+            #             os.path.join(mut_dir, 'mutate.xml')] 
+            #     subprocess.call(args, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+            #     args = ['mv', os.path.join(mut_dir, f'{pdb_id}_clean_0001.pdb'), os.path.join(mut_dir, f'{dir_name}.pdb')]
+            #     subprocess.call(args, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+            #     if check_mutagenesis(str(position), os.path.join(mut_dir), mutation):
+            #         logger.info(f'{dir_name}.pdb is sucessfully created.')
+            #     else:
+            #         logger.warning(f'Mutagenesis for {dir_name}.pdb was unsucessull, continuing to the next mutation.')
+            #         logger_all.warning(f'{dir_name}.  Error at Mutagenesis stage. Continuing to next mutation.')
+            #         continue
+            # else:
+            #     logger.info(f'{dir_name}.pdb already exists. Mutagenesis step is skipped.')
+            if not os.path.isfile(os.path.join(mut_dir,'emp.gro')):
                 #PP: what is emp.gro?
 
                 args = subprocess.Popen([ 'printf', '6\n1\n'], stdout=subprocess.PIPE)
-                args_ = subprocess.Popen(['gmx', 'pdb2gmx', '-f', dir_name, '-o', 'pep.gro', '-p', 'pep.top', '-ignh', '-q'], 
-                                         stdin = args.stdout, stdout= subprocess.DEVNULL)
-                output = args_.communicate()
+                args_ = subprocess.Popen([args_p.gmx_path, 'pdb2gmx', '-f', os.path.join(mut_dir,f'{dir_name}.pdb'), '-o', os.path.join(mut_dir, 'pep_.gro'), '-p', os.path.join(mut_dir, 'pep.top'), '-ignh', '-q'], 
+                                        stdin = args.stdout, stdout= subprocess.DEVNULL)#, stderr = subprocess.DEVNULL)
+                out, err = args_.communicate()
+                print(err)
 
                 #PP this subprocess will be successful, even if gmx returns error, so check that gmx worked properly, i.e. all required files were created.
-                args = ['gmx', 'editconf', '-f', 'pep_.gro', '-o', 'pep.gro', '-d', '0.3', '-bt', 'cubic',  '-c']
-                subprocess.call(args, stdout = subprocess.DEVNULL)
-
+                args = [args_p.gmx_path, 'editconf', '-f', os.path.join(mut_dir, 'pep_.gro'), '-o', os.path.join(mut_dir,'pep.gro'), '-d', '0.3', '-bt', 'cubic',  '-c']
+                subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr = subprocess.DEVNULL)
+                if not os.path.isfile(os.path.join(mut_dir, 'pep.gro')):
+                    logger.warning(f'{pdb_id}, {dir_name}.There was an error attempting fitting a cubic box. Continuing to the next mutation.')
+                    logger_all.warning(f'{pdb_id}, {dir_name}.  Error at creating system stage. Continuing to next mutation.')
+                    continue
                 #PP: what is sys.top?
-                shutil.copyfile(os.path.abspath('../../sys.top'), cur_dir+'/sys.top') 
+                shutil.copyfile(os.path.join(cur_dir, 'sys.top'), os.path.join(mut_dir, 'sys.top')) 
 
-                # todo: change the name of the protein in the name of the system
                 text= []
                 mark = False
-                with open('pep.top') as file:
+                with open(os.path.join(mut_dir, 'pep.top')) as file:
                     for line in file:
                         if 'amber' not in line and not mark:
                             text.append(line)
                         if 'posre.itp' in line:
                             mark = True
                 text.append('#endif')
-                with open('pep.itp', 'w') as f:
+                with open(os.path.join(mut_dir, 'pep.itp'), 'w') as f:
                     for i in text:
                         f.write(i)
-                shutil.copyfile(os.path.abspath('../../em.mdp'), cur_dir+'/em.mdp')
-                shutil.copyfile(os.path.abspath('../../eq.mdp'), cur_dir+'/eq.mdp')
-                shutil.copyfile(os.path.abspath('../../md.mdp'), cur_dir+'/md.mdp')
-                args = ['gmx', 'grompp', '-f', 'em', '-p', 'sys', '-o', 'emp', '-c', 'pep.gro']
-                subprocess.call(args, stdout = subprocess.DEVNULL)
-                args = ['gmx', 'mdrun', '-deffnm', 'emp', '-v']
-                subprocess.call(args, stdout = subprocess.DEVNULL)
-                if not os.path.isfile('emp.tpr') or not os.path.isfile('emp.trr'):
-                    print('error at emp stage')
+
+                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'em.mdp'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'emp.tpr'), '-c', os.path.join(mut_dir, 'pep.gro')]
+                subprocess.call(args, stdout = subprocess.DEVNUL)#L, stderr=subprocess.DEVNULL)
+                args = [args_p.gmx_path, 'mdrun', '-deffnm', os.path.join(mut_dir, 'emp'), '-v']
+                subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
+                if not os.path.isfile(os.path.join(mut_dir, 'emp.tpr')) or not os.path.isfile(os.path.join(mut_dir, 'emp.trr')):
+                    logger.warning(f'{pdb_id}, {dir_name} Error at first minimization stage. Continuing to next mutation.')
+                    logger_all.warning(f'{pdb_id}, {dir_name}.  Error at frist minimization stage. Continuing to next mutation.')
                     continue
-            if not os.path.isfile('em.gro'):
-                args = ['gmx', 'solvate', '-cp', 'emp.gro', '-cs', '-o', 's0.gro', '-p', 'sys.top']
-                subprocess.call(args, stdout = subprocess.DEVNULL)
-                args = ['gmx', 'grompp', '-f', 'em', '-c', 's0', '-p', 'sys', '-o', 'ion']
-                subprocess.call(args, stdout = subprocess.DEVNULL)
-                args = subprocess.Popen([ 'echo', '13'], stdout=subprocess.PIPE)
-                args_ = subprocess.Popen(['gmx', 'genion', '-s', 'ion', '-neutral', '-conc', '0.1', '-p', 'sys.top', '-o', 'start.gro'], 
-                                         stdin = args.stdout, stdout= subprocess.DEVNULL)
+                else:
+                    logger.info(f'{pdb_id}, {dir_name}. Sucessfully ran first minimization step.')
+            else:
+                logger.info(f'{dir_name} emp.gro already exists. Skipping first minimization step.')
+            if not os.path.isfile(os.path.join(mut_dir,'em.gro')):
+                args = [args_p.gmx_path, 'solvate', '-cp', os.path.join(mut_dir, 'emp.gro'), '-cs', '-o', os.path.join(mut_dir,'s0.gro'), '-p', os.path.join(mut_dir, 'sys.top')]
+                subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
+                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'em.mdp'), '-c', os.path.join(mut_dir, 's0.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'ion.tpr')]
+                subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
+                args = subprocess.Popen([ 'echo', '13'], stdout=subprocess.PIPE)#, stderr=subprocess.DEVNULL)
+                args_ = subprocess.Popen([args_p.gmx_path, 'genion', '-s', os.path.join(mut_dir, 'ion.tpr'), '-neutral', '-conc', '0.1', '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'start.gro')], 
+                                        stdin = args.stdout, stdout= subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
                 args_.communicate()
-                args = ['gmx', 'grompp', '-f', 'em', '-c', 'start', '-p', 'sys', '-o', 'em']
-                subprocess.call(args)
-                args = ['gmx', 'mdrun', '-deffnm', 'em', '-v']
-                subprocess.call(args)
-                if os.path.isfile('em.gro') and os.path.isfile('em.trr'):
-                    print('sucessful minimization')
-                else: print('error at minimization stage')
-            if not os.path.isfile('eq.gro'):
-                args = ['gmx', 'grompp', '-f', 'eq', '-c', 'em', '-p', 'sys', '-o', 'eq']
-                subprocess.call(args)
-                args = ['gmx', 'mdrun', '-deffnm', 'eq', '-v']
-                subprocess.call(args)
-            if not os.path.isfile('md.gro'):
-                args = ['gmx', 'grompp', '-f', 'md', '-c', 'eq', '-p', 'sys', '-o', 'md']
-                subprocess.call(args)
-                args= ['gmx', 'mdrun', '-deffnm', 'md']
-                subprocess.call(args)
+                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'em.mdp'), '-c', os.path.join(mut_dir,'start.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'em.tpr')]
+                subprocess.call(args, stdout= subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
+                args = [args_p.gmx_path, 'mdrun', '-deffnm', os.path.join(mut_dir, 'em'), '-v']
+                subprocess.call(args, stdout= subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
+                if os.path.isfile(os.path.join(mut_dir, 'em.gro')):
+                    logger.info(f'{pdb_id}, {dir_name}. Sucessfully ran second minimization')
+                else: 
+                    logger.warning(f'{pdb_id}, {dir_name} Error at second minimization stage. Continuing to next mutation.')
+                    logger_all.warning(f'{pdb_id}, {dir_name}.  Error at second minimization stage. Continuing to next mutation.')
+                    continue
+            else:
+                logger.info(f'{pdb_id}, {dir_name} em.gro already exists. Skipping second minimization step.')
+            if not os.path.isfile(os.path.join(mut_dir,'eq.gro')):
+                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'eq.mdp'), '-c', os.path.join(mut_dir, 'em.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'eq.tpr')]
+                subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr= subprocess.DEVNULL)
+                args = [args_p.gmx_path, 'mdrun', '-deffnm', os.path.join(mut_dir, 'eq'), '-v']
+                subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
+                print(err)
+                if os.path.isfile(os.path.join(mut_dir, 'eq.gro')):
+                    logger.info(f'{pdb_id}, {dir_name}. Sucessfully ran equilibration')
+                else: 
+                    logger.warning(f'{pdb_id}, {dir_name} Error at equilibration stage. Continuing to next mutation.')
+                    logger_all.warning(f'{pdb_id}, {dir_name}.  Error at equilibration stage. Continuing to next mutation.')
+                    continue
+            else:
+                logger.info(f'{pdb_id}, {dir_name} eq.gro already exists. Skipping equilibration step.')
+            if not os.path.isfile(os.path.join(mut_dir,'md.gro')):
+                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'md.mdp'), '-c', os.path.join(mut_dir, 'eq.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'md.tpr')]
+                subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr= subprocess.DEVNULL)
+                args= [args_p.gmx_path, 'mdrun', '-deffnm', os.path.join(mut_dir, 'md')]
+                subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
+                if os.path.isfile(os.path.join(mut_dir, 'md.gro')):
+                    logger.info(f'{pdb_id}, {dir_name}. Sucessfully ran simulation run')
+                    logger_all.info(f'{pdb_id}, {dir_name}. Sucessfully ran simulation run')
+                else: 
+                    logger.warning(f'{pdb_id}, {dir_name} Error at simulation run. Continuing to next mutation.')
+                    continue
+        elif pdb_id not in without_structure:
+            without_structure.append(pdb_id)
+            logger_all.warning(f'There are no structure for {pdb_id}. To run simulations create corresponding directory with {pdb_id} name and load {pdb_id}.pdb. Continuing to the next structure')
+    logger_all.info(f"Skipped following mutations as they are already finished: {', '.join(skipped)}")
 
-            #PP: avoid using break
-            break
-        finally:
-            os.chdir('../../')
-
-
+if __name__ =='__main__':
+    main()

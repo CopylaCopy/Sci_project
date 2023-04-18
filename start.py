@@ -104,36 +104,36 @@ def main():
                 continue
             logger = my_custom_logger(os.path.join(mut_dir, 'logger.log'))          
             logger.info(os.path.join(pdb_id, dir_name))
-            # if not os.path.isfile(os.path.join(mut_dir, f'{dir_name}.pdb')):
-            #     #create mutate.xml
-            #     template_string = f'''<MutateResidue name="one_point_mutation" target="{str(position)}A" new_res="{acids[mutation].upper()}" preserve_atom_coords="false"
-            #     mutate_self="false" update_polymer_bond_dependent="false"/>'''
-            #     temp_string = '<Add mover="one_point_mutation"/>'
-            #     new_text = []
-            #     with open(os.path.join(cur_dir, 'mutate.xml'), 'r') as f:
-            #         for line in f:
-            #             if '/MOVERS' in line:
-            #                 new_text.append(template_string)
-            #             elif '</PROTOCOLS>' in line:
-            #                 new_text.append(temp_string)
-            #             new_text.append(line)
-            #     with open(os.path.join(mut_dir, 'mutate.xml'), 'w') as f:
-            #         for i in new_text:
-            #             f.write(i)
-            #     args = [args_p.rosetta_path, '-s', os.path.join(cur_dir, pdb_id, f'{pdb_id}_clean.pdb'), '-parser:protocol', 
-            #             os.path.join(mut_dir, 'mutate.xml')] 
-            #     subprocess.call(args, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-            #     args = ['mv', os.path.join(mut_dir, f'{pdb_id}_clean_0001.pdb'), os.path.join(mut_dir, f'{dir_name}.pdb')]
-            #     subprocess.call(args, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-            #     if check_mutagenesis(str(position), os.path.join(mut_dir), mutation):
-            #         logger.info(f'{dir_name}.pdb is sucessfully created.')
-            #     else:
-            #         logger.warning(f'Mutagenesis for {dir_name}.pdb was unsucessull, continuing to the next mutation.')
-            #         logger_all.warning(f'{dir_name}.  Error at Mutagenesis stage. Continuing to next mutation.')
-            #         continue
-            # else:
-            #     logger.info(f'{dir_name}.pdb already exists. Mutagenesis step is skipped.')
-            if not os.path.isfile(os.path.join(mut_dir,'emp.gro')):
+            if not os.path.isfile(os.path.join(mut_dir, f'{dir_name}.pdb')):
+                #create mutate.xml
+                template_string = f'''<MutateResidue name="one_point_mutation" target="{str(position)}A" new_res="{acids[mutation].upper()}" preserve_atom_coords="false"
+                mutate_self="false" update_polymer_bond_dependent="false"/>'''
+                temp_string = '<Add mover="one_point_mutation"/>'
+                new_text = []
+                with open(os.path.join(cur_dir, 'mutate.xml'), 'r') as f:
+                    for line in f:
+                        if '/MOVERS' in line:
+                            new_text.append(template_string)
+                        elif '</PROTOCOLS>' in line:
+                            new_text.append(temp_string)
+                        new_text.append(line)
+                with open(os.path.join(mut_dir, 'mutate.xml'), 'w') as f:
+                    for i in new_text:
+                        f.write(i)
+                args = [args_p.rosetta_path, '-s', os.path.join(cur_dir, pdb_id, f'{pdb_id}_clean.pdb'), '-parser:protocol', 
+                        os.path.join(mut_dir, 'mutate.xml')] 
+                subprocess.call(args, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+                args = ['mv', os.path.join(mut_dir, f'{pdb_id}_clean_0001.pdb'), os.path.join(mut_dir, f'{dir_name}.pdb')]
+                subprocess.call(args, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+                if check_mutagenesis(str(position), os.path.join(mut_dir), mutation):
+                    logger.info(f'{dir_name}.pdb is sucessfully created.')
+                else:
+                    logger.warning(f'Mutagenesis for {dir_name}.pdb was unsucessull, continuing to the next mutation.')
+                    logger_all.warning(f'{dir_name}.  Error at Mutagenesis stage. Continuing to next mutation.')
+                    continue
+            else:
+                logger.info(f'{dir_name}.pdb already exists. Mutagenesis step is skipped.')
+            if not os.path.isfile(os.path.join(mut_dir,'em.gro')):
                 #PP: what is emp.gro?
 
                 args = subprocess.Popen([ 'printf', '6\n1\n'], stdout=subprocess.PIPE)
@@ -175,9 +175,6 @@ def main():
                     continue
                 else:
                     logger.info(f'{pdb_id}, {dir_name}. Sucessfully ran first minimization step.')
-            else:
-                logger.info(f'{dir_name} emp.gro already exists. Skipping first minimization step.')
-            if not os.path.isfile(os.path.join(mut_dir,'em.gro')):
                 args = [args_p.gmx_path, 'solvate', '-cp', os.path.join(mut_dir, 'emp.gro'), '-cs', '-o', os.path.join(mut_dir,'s0.gro'), '-p', os.path.join(mut_dir, 'sys.top')]
                 subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
                 args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'em.mdp'), '-c', os.path.join(mut_dir, 's0.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'ion.tpr')]
@@ -197,7 +194,7 @@ def main():
                     logger_all.warning(f'{pdb_id}, {dir_name}.  Error at second minimization stage. Continuing to next mutation.')
                     continue
             else:
-                logger.info(f'{pdb_id}, {dir_name} em.gro already exists. Skipping second minimization step.')
+                logger.info(f'{pdb_id}, {dir_name} em.gro already exists. Skipping minimization step.')
             if not os.path.isfile(os.path.join(mut_dir,'eq.gro')):
                 args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'eq.mdp'), '-c', os.path.join(mut_dir, 'em.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'eq.tpr')]
                 subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr= subprocess.DEVNULL)

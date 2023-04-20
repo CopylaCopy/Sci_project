@@ -46,12 +46,15 @@ def clean_pdb(cur_dir, file_name):
     out, _ = args_.communicate()
     return int(out.decode().split('\t')[1]) ==1
 
-def check_mutagenesis(pos, pdb_path, res):
-    args = subprocess.Popen(['pdb_selres', f'-{pos}', f'{pdb_path}'], stdout=subprocess.PIPE)
-    args_ = subprocess.Popen(['grep', 'ATOM'], stdin=args.stdout, stdout=subprocess.PIPE)
-    args__ = subprocess.Popen(['tail', '-1'], stdout=subprocess.PIPE, stdin=args_.stdout)
-    out, _ = args__.communicate()
-    return res == out.split()[3]
+def check_mutagenesis(pos, pdb_path, dir_name, res):
+    try:
+        args = subprocess.Popen(['pdb_selres', f'-{pos}', os.path.join(pdb_path, f'{dir_name}')], stdout=subprocess.PIPE)
+        args_ = subprocess.Popen(['grep', 'ATOM'], stdin=args.stdout, stdout=subprocess.PIPE)
+        args__ = subprocess.Popen(['tail', '-1'], stdout=subprocess.PIPE, stdin=args_.stdout)
+        out, _ = args__.communicate()
+        return acids[res] == out.decode().split()[3]
+    except:
+        return False
 
 
 def main():
@@ -61,17 +64,6 @@ def main():
     parser.add_argument("--rosetta_path", type=str, default='/home/ekaterina_andreichuk/Downloads/rosetta_src_2021.16.61629_bundle/main/source/bin/rosetta_scripts.default.linuxgccrelease', help="path to rosetta")
     parser.add_argument("--gmx_path", type=str, default='/usr/local/bin/gmx', help="path to gmx")
     #add force reload from some step for particular pdb_id
-    # parser.add_argument("--lambda_u", type=float, default=0.1, help="regularization parameter lambda_u of the CF model")
-    # parser.add_argument("--lambda_v", type=float, default=0.1, help="regularization parameter lambda_v of the CF model")
-    # parser.add_argument("--als_iter", type=int, default=15, help="# of iterations for ALS training")
-    # parser.add_argument("--debug_iter", type=int, default=20, help="# of iterations in the debugging stage")
-    # parser.add_argument("--debug_lr", type=float, default=0.05, help="learning rate in the debugging stage")
-    # parser.add_argument("--retrain", type=str, default="full", help="the retraining mode in the debugging stage: full/inc")
-    # parser.add_argument("--process", type=int, default=4, help="# of processes in the debugging stage")
-    # parser.add_argument("--mode", type=str, default="debug", help="debug/test")
-    # parser.add_argument("--implicit", action='store_true', help="use implicit ALS")
-    # parser.add_argument("--alpha", type=int, default=1, help="confidence scaling for implicit feedback dataset")
-    # parser.add_argument("--als_threads", type=int, default=6, help="num threads during implicit ALS fit")
 
     args_p = parser.parse_args()
 
@@ -87,7 +79,6 @@ def main():
         mutation = row.mutation 
         if os.path.isdir(os.path.join(cur_dir, pdb_id)) and pdb_id not in without_structure:
             #PP: check that each 'if' has 'else'
-            #PP: avoid jumping over directories. You can make path variable using os.path.join(workdir, pdb_id)
             if not os.path.isfile(os.path.join(cur_dir, pdb_id, f'{pdb_id}_clean.pdb')):   
                 if not clean_pdb(cur_dir, pdb_id):
                     without_structure.append(pdb_id)
@@ -103,7 +94,7 @@ def main():
                 skipped.append(' '.join([pdb_id, dir_name]))
                 continue
             logger = my_custom_logger(os.path.join(mut_dir, 'logger.log'))          
-            logger.info(os.path.join(pdb_id, dir_name))
+            logger_all.info(os.path.join(pdb_id, dir_name))
             if not os.path.isfile(os.path.join(mut_dir, f'{dir_name}.pdb')):
                 #create mutate.xml
                 template_string = f'''<MutateResidue name="one_point_mutation" target="{str(position)}A" new_res="{acids[mutation].upper()}" preserve_atom_coords="false"
@@ -129,7 +120,9 @@ def main():
                     logger.info(f'{dir_name}.pdb is sucessfully created.')
                 else:
                     logger.warning(f'Mutagenesis for {dir_name}.pdb was unsucessull, continuing to the next mutation.')
-                    logger_all.warning(f'{dir_name}.  Error at Mutagenesis stage. Continuing to next mutation.')
+                    args = ['rm', os.path.join(mut_dir, f'{dir_name}.pdb')]
+                    subprocess.call(args)
+                    logger_all.warning(f'{pdb_id}, {dir_name}.  Error at Mutagenesis stage. Continuing to next mutation.')
                     continue
             else:
                 logger.info(f'{dir_name}.pdb already exists. Mutagenesis step is skipped.')
@@ -139,8 +132,7 @@ def main():
                 args = subprocess.Popen([ 'printf', '6\n1\n'], stdout=subprocess.PIPE)
                 args_ = subprocess.Popen([args_p.gmx_path, 'pdb2gmx', '-f', os.path.join(mut_dir,f'{dir_name}.pdb'), '-o', os.path.join(mut_dir, 'pep_.gro'), '-p', os.path.join(mut_dir, 'pep.top'), '-ignh', '-q'], 
                                         stdin = args.stdout, stdout= subprocess.DEVNULL)#, stderr = subprocess.DEVNULL)
-                out, err = args_.communicate()
-                print(err)
+                oerr = args_.communicate()
 
                 #PP this subprocess will be successful, even if gmx returns error, so check that gmx worked properly, i.e. all required files were created.
                 args = [args_p.gmx_path, 'editconf', '-f', os.path.join(mut_dir, 'pep_.gro'), '-o', os.path.join(mut_dir,'pep.gro'), '-d', '0.3', '-bt', 'cubic',  '-c']
@@ -169,7 +161,7 @@ def main():
                 subprocess.call(args, stdout = subprocess.DEVNUL)#L, stderr=subprocess.DEVNULL)
                 args = [args_p.gmx_path, 'mdrun', '-deffnm', os.path.join(mut_dir, 'emp'), '-v']
                 subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
-                if not os.path.isfile(os.path.join(mut_dir, 'emp.tpr')) or not os.path.isfile(os.path.join(mut_dir, 'emp.trr')):
+                if not os.path.isfile(os.path.join(mut_dir, 'emp.tpr')):
                     logger.warning(f'{pdb_id}, {dir_name} Error at first minimization stage. Continuing to next mutation.')
                     logger_all.warning(f'{pdb_id}, {dir_name}.  Error at frist minimization stage. Continuing to next mutation.')
                     continue

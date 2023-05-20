@@ -20,7 +20,7 @@ def my_custom_logger(logger_name, level=logging.DEBUG):
         "%(asctime)s — %(levelname)s: %(lineno)d — %(message)s"
     )
     log_format = logging.Formatter(format_string)
-    # Creating and adding the console handler
+    # Creating and adding the console handler``
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(log_format)
     logger.addHandler(console_handler)
@@ -101,7 +101,7 @@ def main():
                 mutate_self="false" update_polymer_bond_dependent="false"/>'''
                 temp_string = '<Add mover="one_point_mutation"/>'
                 new_text = []
-                with open(os.path.join(cur_dir, 'mutate.xml'), 'r') as f:
+                with open(os.path.join(cur_dir, 'resorces', 'mutate.xml'), 'r') as f:
                     for line in f:
                         if '/MOVERS' in line:
                             new_text.append(template_string)
@@ -142,7 +142,7 @@ def main():
                     logger_all.warning(f'{pdb_id}, {dir_name}.  Error at creating system stage. Continuing to next mutation.')
                     continue
                 #PP: what is sys.top?
-                shutil.copyfile(os.path.join(cur_dir, 'sys.top'), os.path.join(mut_dir, 'sys.top')) 
+                shutil.copyfile(os.path.join(cur_dir, 'resorces',  'sys.top'), os.path.join(mut_dir, 'sys.top')) 
 
                 text= []
                 mark = False
@@ -157,7 +157,7 @@ def main():
                     for i in text:
                         f.write(i)
 
-                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'em.mdp'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'emp.tpr'), '-c', os.path.join(mut_dir, 'pep.gro')]
+                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'resorces', 'em.mdp'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'emp.tpr'), '-c', os.path.join(mut_dir, 'pep.gro')]
                 subprocess.call(args, stdout = subprocess.DEVNUL)#L, stderr=subprocess.DEVNULL)
                 args = [args_p.gmx_path, 'mdrun', '-deffnm', os.path.join(mut_dir, 'emp'), '-v']
                 subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
@@ -169,13 +169,13 @@ def main():
                     logger.info(f'{pdb_id}, {dir_name}. Sucessfully ran first minimization step.')
                 args = [args_p.gmx_path, 'solvate', '-cp', os.path.join(mut_dir, 'emp.gro'), '-cs', '-o', os.path.join(mut_dir,'s0.gro'), '-p', os.path.join(mut_dir, 'sys.top')]
                 subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
-                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'em.mdp'), '-c', os.path.join(mut_dir, 's0.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'ion.tpr')]
+                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'resorces' 'em.mdp'), '-c', os.path.join(mut_dir, 's0.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'ion.tpr')]
                 subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
                 args = subprocess.Popen([ 'echo', '13'], stdout=subprocess.PIPE)#, stderr=subprocess.DEVNULL)
                 args_ = subprocess.Popen([args_p.gmx_path, 'genion', '-s', os.path.join(mut_dir, 'ion.tpr'), '-neutral', '-conc', '0.1', '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'start.gro')], 
                                         stdin = args.stdout, stdout= subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
                 args_.communicate()
-                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'em.mdp'), '-c', os.path.join(mut_dir,'start.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'em.tpr')]
+                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'resorces', 'em.mdp'), '-c', os.path.join(mut_dir,'start.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'em.tpr')]
                 subprocess.call(args, stdout= subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
                 args = [args_p.gmx_path, 'mdrun', '-deffnm', os.path.join(mut_dir, 'em'), '-v']
                 subprocess.call(args, stdout= subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
@@ -188,7 +188,7 @@ def main():
             else:
                 logger.info(f'{pdb_id}, {dir_name} em.gro already exists. Skipping minimization step.')
             if not os.path.isfile(os.path.join(mut_dir,'eq.gro')):
-                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'eq.mdp'), '-c', os.path.join(mut_dir, 'em.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'eq.tpr')]
+                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'resorces', 'eq.mdp'), '-c', os.path.join(mut_dir, 'em.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'eq.tpr')]
                 subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr= subprocess.DEVNULL)
                 args = [args_p.gmx_path, 'mdrun', '-deffnm', os.path.join(mut_dir, 'eq'), '-v']
                 subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
@@ -202,7 +202,7 @@ def main():
             else:
                 logger.info(f'{pdb_id}, {dir_name} eq.gro already exists. Skipping equilibration step.')
             if not os.path.isfile(os.path.join(mut_dir,'md.gro')):
-                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'md.mdp'), '-c', os.path.join(mut_dir, 'eq.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'md.tpr')]
+                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'resorces', 'md.mdp'), '-c', os.path.join(mut_dir, 'eq.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'md.tpr')]
                 subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr= subprocess.DEVNULL)
                 args= [args_p.gmx_path, 'mdrun', '-deffnm', os.path.join(mut_dir, 'md')]
                 subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)

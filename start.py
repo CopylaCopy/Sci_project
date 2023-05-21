@@ -58,6 +58,8 @@ def check_mutagenesis(pos, pdb_path, dir_name, res):
 
 
 def main():
+    #PP: the starting md files should be place in a separate folder, e.g. resources/md
+    #PP: the other required files should also be put in resources folder
     parser = argparse.ArgumentParser(description="run")
     parser.add_argument("--dataset", type=str, default="dataset_prot.csv", help="dataset")
     parser.add_argument("--delim", type=str, default=";", help="delimiter of each line in the dataset file")
@@ -72,13 +74,14 @@ def main():
     without_structure = []
     skipped = []
     logger_all = my_custom_logger(os.path.join(cur_dir, 'logger.log'))
+    #PP: it is better to split main function into several ones corresponding to logic blocks
     for _, row in df.iterrows():
+        #PP: as def process_point_mutation(...)
         pdb_id = row.pdb_id
         position = row.position
         wild_type = row.wild_type
         mutation = row.mutation 
         if os.path.isdir(os.path.join(cur_dir, pdb_id)) and pdb_id not in without_structure:
-            #PP: check that each 'if' has 'else'
             if not os.path.isfile(os.path.join(cur_dir, pdb_id, f'{pdb_id}_clean.pdb')):   
                 if not clean_pdb(cur_dir, pdb_id):
                     without_structure.append(pdb_id)
@@ -91,17 +94,21 @@ def main():
             if not os.path.isdir(os.path.join(cur_dir, pdb_id, dir_name)):        
                 os.mkdir(mut_dir) 
             if os.path.isfile(os.path.join(mut_dir, 'md.gro')):
+                #PP: need to log this condition
+                #PP: we may want to recalculate trajectory, so need if flag_rerun==False
                 skipped.append(' '.join([pdb_id, dir_name]))
                 continue
             logger = my_custom_logger(os.path.join(mut_dir, 'logger.log'))          
             logger_all.info(os.path.join(pdb_id, dir_name))
             if not os.path.isfile(os.path.join(mut_dir, f'{dir_name}.pdb')):
+                #PP: as def make_rosetta_xml_for_point_mutation()
                 #create mutate.xml
                 template_string = f'''<MutateResidue name="one_point_mutation" target="{str(position)}A" new_res="{acids[mutation].upper()}" preserve_atom_coords="false"
                 mutate_self="false" update_polymer_bond_dependent="false"/>'''
                 temp_string = '<Add mover="one_point_mutation"/>'
                 new_text = []
-                with open(os.path.join(cur_dir, 'resorces', 'mutate.xml'), 'r') as f:
+                #PP: make more specific filename to avoid rewriting conflict
+                with open(os.path.join(cur_dir, 'mutate.xml'), 'r') as f:
                     for line in f:
                         if '/MOVERS' in line:
                             new_text.append(template_string)
@@ -127,23 +134,22 @@ def main():
             else:
                 logger.info(f'{dir_name}.pdb already exists. Mutagenesis step is skipped.')
             if not os.path.isfile(os.path.join(mut_dir,'em.gro')):
-                #PP: what is emp.gro?
 
                 args = subprocess.Popen([ 'printf', '6\n1\n'], stdout=subprocess.PIPE)
                 args_ = subprocess.Popen([args_p.gmx_path, 'pdb2gmx', '-f', os.path.join(mut_dir,f'{dir_name}.pdb'), '-o', os.path.join(mut_dir, 'pep_.gro'), '-p', os.path.join(mut_dir, 'pep.top'), '-ignh', '-q'], 
                                         stdin = args.stdout, stdout= subprocess.DEVNULL)#, stderr = subprocess.DEVNULL)
                 oerr = args_.communicate()
 
-                #PP this subprocess will be successful, even if gmx returns error, so check that gmx worked properly, i.e. all required files were created.
                 args = [args_p.gmx_path, 'editconf', '-f', os.path.join(mut_dir, 'pep_.gro'), '-o', os.path.join(mut_dir,'pep.gro'), '-d', '0.3', '-bt', 'cubic',  '-c']
                 subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr = subprocess.DEVNULL)
                 if not os.path.isfile(os.path.join(mut_dir, 'pep.gro')):
                     logger.warning(f'{pdb_id}, {dir_name}.There was an error attempting fitting a cubic box. Continuing to the next mutation.')
                     logger_all.warning(f'{pdb_id}, {dir_name}.  Error at creating system stage. Continuing to next mutation.')
                     continue
-                #PP: what is sys.top?
-                shutil.copyfile(os.path.join(cur_dir, 'resorces',  'sys.top'), os.path.join(mut_dir, 'sys.top')) 
+                    
+                shutil.copyfile(os.path.join(cur_dir, 'sys.top'), os.path.join(mut_dir, 'sys.top')) 
 
+                #PP: as def prepare_topology()
                 text= []
                 mark = False
                 with open(os.path.join(mut_dir, 'pep.top')) as file:
@@ -157,7 +163,9 @@ def main():
                     for i in text:
                         f.write(i)
 
-                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'resorces', 'em.mdp'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'emp.tpr'), '-c', os.path.join(mut_dir, 'pep.gro')]
+                #PP: make separate functions for each gromacs function
+                #PP: btw check if gromacs already has python interface
+                args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'em.mdp'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'emp.tpr'), '-c', os.path.join(mut_dir, 'pep.gro')]
                 subprocess.call(args, stdout = subprocess.DEVNUL)#L, stderr=subprocess.DEVNULL)
                 args = [args_p.gmx_path, 'mdrun', '-deffnm', os.path.join(mut_dir, 'emp'), '-v']
                 subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
@@ -186,6 +194,7 @@ def main():
                     logger_all.warning(f'{pdb_id}, {dir_name}.  Error at second minimization stage. Continuing to next mutation.')
                     continue
             else:
+                #PP: here and below same issue with re-run
                 logger.info(f'{pdb_id}, {dir_name} em.gro already exists. Skipping minimization step.')
             if not os.path.isfile(os.path.join(mut_dir,'eq.gro')):
                 args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'resorces', 'eq.mdp'), '-c', os.path.join(mut_dir, 'em.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'eq.tpr')]

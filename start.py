@@ -9,7 +9,7 @@ import argparse
 import logging
 import sys
 import json
-from copy import copy
+from copy import deepcopy
 
 
 def my_custom_logger(logger_name, level=logging.DEBUG):
@@ -61,10 +61,10 @@ def check_mutagenesis(pos, pdb_path, dir_name, res):
 def get_mutation_dikt(df, force_reload, cur_dir):
     lz = df[['pdb_id', 'position', 'wild_type', 'mutation']].groupby('pdb_id').apply(lambda x: x[['position', 'wild_type', 'mutation']].to_dict(orient = 'records')).to_dict()
     lz = {i: [k['wild_type']+str(k['position'])+k['mutation'] for k in j] for i, j in lz.items()}
-    md_dikt = copy(lz)
-    mutation_dikt = copy(md_dikt)
-    em_dikt = copy(md_dikt)
-    eq_dikt = copy(md_dikt)
+    md_dikt = deepcopy(lz)
+    mutation_dikt = deepcopy(lz)
+    em_dikt = deepcopy(lz)
+    eq_dikt = deepcopy(lz)
     skipped = []
     for prot in lz:
         mutation_reload = force_reload['mutation'].get(prot, [])
@@ -72,19 +72,24 @@ def get_mutation_dikt(df, force_reload, cur_dir):
         eq_reload = force_reload['eq'].get(prot, [])
         md_reload = force_reload['md'].get(prot, [])
         for mut in lz[prot]:
-            if os.path.isdir(os.path.join(cur_dir, prot, mut, f'{mut}.pdb')) and mutation_reload!='all' and mut not in mutation_reload:
+        #    print(prot, mut, mutation_dikt[prot], em_dikt[prot], eq_dikt[prot])
+            if os.path.isfile(os.path.join(cur_dir, prot, mut, f'{mut}.pdb')) and (mutation_reload!='all' or mut not in mutation_reload):
+        #        print('*')
                 mutation_dikt[prot].remove(mut)
             else:
                 continue
-            if os.path.isdir(os.path.join(cur_dir, prot, mut, f'em.gro')) and em_reload!='all' and mut not in em_reload:
+            if os.path.isfile(os.path.join(cur_dir, prot, mut, f'em.gro')) and (em_reload!='all' or mut not in em_reload):
+         #       print('&')
                 em_dikt[prot].remove(mut)
             else:
                 continue
-            if os.path.isdir(os.path.join(cur_dir, prot, mut, f'eq.gro')) and eq_reload!='all' and mut not in eq_reload:
+            if os.path.isfile(os.path.join(cur_dir, prot, mut, f'eq.gro')) and (eq_reload!='all' or mut not in eq_reload):
+         #       print('3')
                 eq_dikt[prot].remove(mut)
             else:
                 continue
-            if os.path.isdir(os.path.join(cur_dir, prot, mut, f'md.gro')) and md_reload!='all' and mut not in md_reload:
+            if os.path.isfile(os.path.join(cur_dir, prot, mut, f'md.gro')) and (md_reload!='all' or mut not in md_reload):
+          #      print('4')
                 md_dikt[prot].remove(mut)
                 skipped.append(' '.join([prot, mut]))
             else:
@@ -117,14 +122,14 @@ def make_rosetta_xml_for_point_mutation(cur_dir, mut_dir, dir_name, pdb_id, posi
 def fit_to_box(dir_name, mut_dir, args_p):
     args = subprocess.Popen([ 'printf', '6\n1\n'], stdout=subprocess.PIPE)
     args_ = subprocess.Popen([args_p.gmx_path, 'pdb2gmx', '-f', os.path.join(mut_dir,f'{dir_name}.pdb'), '-o', os.path.join(mut_dir, 'pep_.gro'), '-p', os.path.join(mut_dir, 'pep.top'), '-ignh', '-q'], 
-                            stdin = args.stdout, stdout= subprocess.DEVNULL)#, stderr = subprocess.DEVNULL)
+                            stdin = args.stdout, stdout= subprocess.DEVNULL, stderr = subprocess.DEVNULL)
     oerr = args_.communicate()
 
     args = [args_p.gmx_path, 'editconf', '-f', os.path.join(mut_dir, 'pep_.gro'), '-o', os.path.join(mut_dir,'pep.gro'), '-d', '0.3', '-bt', 'cubic',  '-c']
-    subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr = subprocess.DEVNULL)
+    subprocess.call(args, stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
 
 def prepare_topology(mut_dir, cur_dir):
-    shutil.copyfile(os.path.join(cur_dir, 'sys.top'), os.path.join(mut_dir, 'sys.top')) 
+    shutil.copyfile(os.path.join(cur_dir, 'resorces', 'sys.top'), os.path.join(mut_dir, 'sys.top')) 
     text= []
     mark = False
     with open(os.path.join(mut_dir, 'pep.top')) as file:
@@ -140,35 +145,35 @@ def prepare_topology(mut_dir, cur_dir):
 
 def minimization_run(mut_dir, cur_dir, args_p):
     args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'resorces', 'mdp', 'em.mdp'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'emp.tpr'), '-c', os.path.join(mut_dir, 'pep.gro')]
-    subprocess.call(args, stdout = subprocess.DEVNUL)#L, stderr=subprocess.DEVNULL)
+    subprocess.call(args, stdout = subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     args = [args_p.gmx_path, 'mdrun', '-deffnm', os.path.join(mut_dir, 'emp'), '-v']
-    subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
+    subprocess.call(args, stdout = open(os.path.join(mut_dir, 'em_1.log'), 'w'), stderr=open(os.path.join(mut_dir, 'em_1.log'), 'w'))
 
 def system_solvate(mut_dir, cur_dir, args_p):
     args = [args_p.gmx_path, 'solvate', '-cp', os.path.join(mut_dir, 'emp.gro'), '-cs', '-o', os.path.join(mut_dir,'s0.gro'), '-p', os.path.join(mut_dir, 'sys.top')]
-    subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
+    subprocess.call(args, stdout = subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'resorces', 'mdp',  'em.mdp'), '-c', os.path.join(mut_dir, 's0.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'ion.tpr')]
-    subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
-    args = subprocess.Popen([ 'echo', '13'], stdout=subprocess.PIPE)#, stderr=subprocess.DEVNULL)
+    subprocess.call(args, stdout = subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    args = subprocess.Popen([ 'echo', '13'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     args_ = subprocess.Popen([args_p.gmx_path, 'genion', '-s', os.path.join(mut_dir, 'ion.tpr'), '-neutral', '-conc', '0.1', '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'start.gro')], 
-                            stdin = args.stdout, stdout= subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
+                            stdin = args.stdout, stdout= subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     args_.communicate()
     args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'resorces', 'mdp', 'em.mdp'), '-c', os.path.join(mut_dir,'start.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'em.tpr')]
-    subprocess.call(args, stdout= subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
+    subprocess.call(args, stdout= subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     args = [args_p.gmx_path, 'mdrun', '-deffnm', os.path.join(mut_dir, 'em'), '-v']
-    subprocess.call(args, stdout= subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
+    subprocess.call(args, stdout= open(os.path.join(mut_dir, 'em_2.log'), 'w'), stderr=open(os.path.join(mut_dir, 'em_2.log'), 'w'))
 
 def equilibration(mut_dir, cur_dir, args_p):
     args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'resorces', 'mdp', 'eq.mdp'), '-c', os.path.join(mut_dir, 'em.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'eq.tpr')]
-    subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr= subprocess.DEVNULL)
+    subprocess.call(args, stdout = subprocess.DEVNULL, stderr= subprocess.DEVNULL)
     args = [args_p.gmx_path, 'mdrun', '-deffnm', os.path.join(mut_dir, 'eq'), '-v']
-    subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
+    subprocess.call(args, stdout = open(os.path.join(mut_dir, 'eq.log'), 'w'), stderr=open(os.path.join(mut_dir, 'eq.log'), 'w'))
 
 def run_simulation(cur_dir, mut_dir, args_p):
     args = [args_p.gmx_path, 'grompp', '-f', os.path.join(cur_dir, 'resorces', 'mdp', 'md.mdp'), '-c', os.path.join(mut_dir, 'eq.gro'), '-p', os.path.join(mut_dir, 'sys.top'), '-o', os.path.join(mut_dir, 'md.tpr')]
-    subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr= subprocess.DEVNULL)
+    subprocess.call(args, stdout = subprocess.DEVNULL, stderr= subprocess.DEVNULL)
     args= [args_p.gmx_path, 'mdrun', '-deffnm', os.path.join(mut_dir, 'md')]
-    subprocess.call(args, stdout = subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)
+    subprocess.call(args, stdout = open(os.path.join(mut_dir, 'md.log'), 'w'), stderr=open(os.path.join(mut_dir, 'md.log'), 'w'))
 
 
 def process_point_mutation(dir_name, cur_dir, pdb_id, logger_all, mutation_dikt, em_dikt, eq_dikt, md_dikt, args_p):
@@ -181,7 +186,7 @@ def process_point_mutation(dir_name, cur_dir, pdb_id, logger_all, mutation_dikt,
     logger = my_custom_logger(os.path.join(mut_dir, 'logger.log'))          
     logger_all.info(os.path.join(pdb_id, dir_name))
     if dir_name in mutation_dikt[pdb_id]:
-        make_rosetta_xml_for_point_mutation(cur_dir, mut_dir, dir_name, pdb_id, position, mutation, args_p)
+        make_rosetta_xml_for_point_mutation(cur_dir, mut_dir, dir_name, pdb_id, position, mutation, args_p) 
         if check_mutagenesis(position, os.path.join(mut_dir), mutation):
             logger.info(f'{dir_name}.pdb is sucessfully created.')
         else:
@@ -255,6 +260,7 @@ def main():
     df = pd.read_csv(args_p.dataset, delimiter =args_p.delim)
 
     mutation_dikt, em_dikt, eq_dikt, md_dikt, skipped = get_mutation_dikt(df, force_reload, cur_dir)
+    print(mutation_dikt)
     logger_all = my_custom_logger(os.path.join(cur_dir, 'logger.log'))
     logger_all.info(f"Following mutations will be skipped: {', '.join(skipped)}")
     for pdb_id in md_dikt:
